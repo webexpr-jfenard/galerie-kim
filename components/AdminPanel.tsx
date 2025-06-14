@@ -37,7 +37,7 @@ import {
   AlertCircle,
   Info
 } from "lucide-react";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { galleryService } from "../services/galleryService";
 import { authService } from "../services/authService";
 import { supabaseService } from "../services/supabaseService";
