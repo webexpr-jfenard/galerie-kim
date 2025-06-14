@@ -12,7 +12,7 @@ import {
   Search,
   Send
 } from "lucide-react";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { galleryService } from "../services/galleryService";
 import { favoritesService } from "../services/favoritesService";
 import type { Gallery, Photo } from "../services/galleryService";
