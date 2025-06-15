@@ -366,7 +366,7 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
                 </Button>
                 <div className="min-w-0 flex-1">
                   <h1 className="text-lg lg:text-2xl font-bold truncate">{gallery.name}</h1>
-                  <div className="flex flex-wrap items-center gap-2 text-xs lg:text-sm text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2 text-xs lg:text-sm text-muted-foreground hidden-mb">
                     <span>{filteredPhotos.length} photos</span>
                     <span>•</span>
                     <span>{selection.size} sélectionnées</span>
@@ -581,7 +581,7 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
       </div>
 
 
- <div className="pt-8 border-t">
+ <div className="pt-8 pb-8 border-t">
             <div className="text-center space-y-3">
               <h3 className="font-semibold text-sm">VOTRE GALERIE PHOTO - KIM REDLER, PHOTOGRAPHE</h3>
               <div className="space-y-2 text-xs text-muted-foreground">
