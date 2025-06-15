@@ -45,7 +45,7 @@ const router = {
         // For home page, clear hash
         window.location.hash = '';
         // Update page title
-        document.title = 'Galerie Photo';
+        document.title = 'Votre Galerie photos｜KR';
       } else {
         // For other routes, always use hash routing (SPA-friendly)
         window.location.hash = path;
