@@ -148,9 +148,11 @@
 .text-destructive-foreground { color: var(--destructive-foreground); }
 
 .border-border { border-color: var(--border); }
-.border-input { border-color: var(--input); }
+.border-input { border-color: #000000; }
 .border-muted { border-color: var(--muted); }
 .border-t-primary { border-top-color: var(--primary); }
+
+.data-\[state\=checked\]\:bg-primary[data-state=checked] {background: #000000}
 
 @layer base {
   * {
