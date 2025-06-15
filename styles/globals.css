@@ -153,6 +153,7 @@
 .border-t-primary { border-top-color: var(--primary); }
 
 .data-\[state\=checked\]\:bg-primary[data-state=checked] {background: #000000 !important}
+.bg-card\/50 {background : white !important}
 
 @layer base {
   * {
