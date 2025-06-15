@@ -53,9 +53,9 @@ export function HomePage() {
 </svg>
             </div>
             <div>
-              <h1 className="text-3xl font-bold mb-2">Votre Galerie Photos</h1>
+              <h1 className="text-3xl font-bold mb-2">Votre galerie photos</h1>
               <p className="text-muted-foreground">
-                Entrer votre ID de galerie transmis pour accéder à vos photos.
+                Entrer votre ID de galerie transmis pour accéder à vos photos et commencer votre sélection.
               </p>
             </div>
           </div>
@@ -94,23 +94,15 @@ export function HomePage() {
             <div className="text-center space-y-3">
               <h3 className="font-semibold text-sm">Need Help?</h3>
               <div className="space-y-2 text-xs text-muted-foreground">
-                <p>
-                  • Contact your photographer if you don't have a Gallery ID
-                </p>
+                <a href="mailto:contact@kimredler.com">contact@kimredler.com</a>
                
-                <p>
-                  • You can favorite photos and leave comments for selection
-                </p>
+              
               </div>
             </div>
           </div>
 
           {/* Footer */}
-          <div className="pt-8">
-            <Badge variant="outline" className="text-xs">
-              Professional Photo Gallery System
-            </Badge>
-          </div>
+         
         </div>
       </div>
     </div>
