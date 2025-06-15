@@ -137,7 +137,7 @@ export function SubfolderSelector({
             {/* Existing subfolders */}
             {subfolders.map((subfolder) => (
               <SelectItem key={subfolder.name} value={subfolder.name}>
-                <div className="flex items-center justify-between w-full">
+                <div className="flex items-center justify-between w-full white-bg">
                   <div className="flex items-center gap-2">
                     <Folder className="h-4 w-4 text-blue-500" />
                     <span>{subfolder.name}</span>
