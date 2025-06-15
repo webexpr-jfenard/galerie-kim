@@ -418,6 +418,8 @@ html {
     }
 }
 
+@media (width <= 480px) { .hidden-mb { display:none}}
+
 .photo-name-overlay {
     color: #fff;
     opacity: 0;
