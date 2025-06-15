@@ -580,6 +580,17 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
         )}
       </div>
 
+
+ <div className="pt-8 border-t">
+            <div className="text-center space-y-3">
+              <h3 className="font-semibold text-sm">VOTRE GALERIE PHOTO - KIM REDLER, PHOTOGRAPHE</h3>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <a href="mailto:contact@kimredler.com">contact@kimredler.com</a>
+               
+              
+              </div>
+            </div>
+          </div>
       {/* Lightbox */}
       <Lightbox
         photos={filteredPhotos}
