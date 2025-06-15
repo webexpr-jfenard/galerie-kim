@@ -6,7 +6,7 @@ import { Textarea } from "./ui/textarea";
 import { Heart, Trash2, MessageSquare, Save, Edit, X, Expand } from "lucide-react";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { favoritesService, type FavoritePhoto } from "../services/favoritesService";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 
 interface FavoritePhotoItemProps {
   photo: FavoritePhoto;
