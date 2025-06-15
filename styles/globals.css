@@ -148,7 +148,7 @@
 .text-destructive-foreground { color: var(--destructive-foreground); }
 
 .border-border { border-color: var(--border); }
-.border-input { border-color: #000000; }
+.border-input { border: 1px solid #d1d5db; }
 .border-muted { border-color: var(--muted); }
 .border-t-primary { border-top-color: var(--primary); }
 
