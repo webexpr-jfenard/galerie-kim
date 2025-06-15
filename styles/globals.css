@@ -382,7 +382,7 @@ html {
     justify-content: space-between;
     align-items: flex-end;
     padding: 1rem;
-    border-radius: 12px;
+    border-radius: 0px;
   }
 
   .photo-container:hover .photo-overlay {
@@ -600,7 +600,7 @@ html {
     width: auto;
     height: auto;
     object-fit: contain;
-    border-radius: 8px;
+    border-radius: 0px;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
     display: block; /* Ensure image displays */
     z-index: 99999;
