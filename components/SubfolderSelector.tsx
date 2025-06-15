@@ -120,7 +120,7 @@ export function SubfolderSelector({
           disabled={disabled || isLoading}
         >
           <SelectTrigger className="w-full">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-white">
               <Folder className="h-4 w-4 text-muted-foreground" />
               <SelectValue placeholder="Choisir un sous-dossier existant ou créer un nouveau..." />
             </div>
@@ -128,7 +128,7 @@ export function SubfolderSelector({
           <SelectContent>
             {/* Root folder option - use special value to avoid empty string */}
             <SelectItem value="ROOT_FOLDER">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-white">
                 <Folder className="h-4 w-4" />
                 Racine (pas de sous-dossier)
               </div>
