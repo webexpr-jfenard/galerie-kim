@@ -385,6 +385,68 @@ html {
     opacity: 1;
   }
 
+.subfolder-indicator {
+    color: #fff;
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    background: #10b981f2;
+    border-radius: 12px;
+    align-items: center;
+    max-width: 120px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    display: flex;
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px #00000026;
+}
+
+@media (width <= 480px) {
+    .subfolder-indicator {
+        max-width: 80px;
+        bottom: 8px;
+        left: 8px;
+    }
+}
+
+.photo-name-overlay {
+    color: #fff;
+    opacity: 0;
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    z-index: 20;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    background: #000c;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+    transition: opacity .3s;
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    right: 60px;
+    overflow: hidden;
+}
+
+@media (width >= 768px) {
+    .photo-name-overlay {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+}
+
+.photo-container:hover .photo-name-overlay {
+    opacity: 1;
+}
+
   /* Always visible favorite indicator */
   .favorite-indicator {
     position: absolute;
