@@ -33,6 +33,13 @@ export interface Photo {
   isSelected?: boolean;
   bucketPath?: string; // Full path in Supabase bucket
   supabaseFile?: StorageFile; // Original Supabase file metadata
+  subfolder?: string; // NEW: Subfolder for organization
+}
+
+export interface SubfolderInfo {
+  name: string;
+  photoCount: number;
+  lastUpdated: string;
 }
 
 class GalleryService {
@@ -41,8 +48,50 @@ class GalleryService {
   private readonly AUTH_KEY = 'gallery-auth-sessions';
   private readonly DEFAULT_BUCKET = 'photos'; // Default Supabase bucket name
   private readonly GALLERIES_TABLE = 'galleries'; // Supabase table name
+  private readonly PHOTOS_TABLE = 'photos'; // Supabase photos table
   
   private migrationComplete = false;
+
+  // Check if database tables exist and are accessible
+  private async checkDatabaseHealth(): Promise<{ tablesExist: boolean; functionsExist: boolean }> {
+    if (!supabaseService.isReady()) {
+      return { tablesExist: false, functionsExist: false };
+    }
+
+    try {
+      // Test galleries table
+      const { error: galleriesError } = await supabaseService.client
+        .from(this.GALLERIES_TABLE)
+        .select('id')
+        .limit(1);
+
+      // Test photos table
+      const { error: photosError } = await supabaseService.client
+        .from(this.PHOTOS_TABLE)
+        .select('id')
+        .limit(1);
+
+      // Test function
+      const { error: functionError } = await supabaseService.client
+        .rpc('get_gallery_subfolders', { gallery_id_param: 'test' });
+
+      const tablesExist = !galleriesError && !photosError;
+      const functionsExist = !functionError || functionError.code !== 'PGRST202';
+
+      console.log('Database health check:', { 
+        tablesExist, 
+        functionsExist,
+        galleriesError: galleriesError?.code,
+        photosError: photosError?.code,
+        functionError: functionError?.code
+      });
+
+      return { tablesExist, functionsExist };
+    } catch (error) {
+      console.error('Database health check failed:', error);
+      return { tablesExist: false, functionsExist: false };
+    }
+  }
 
   // Initialize and ensure table exists
   private async ensureTableExists(): Promise<void> {
@@ -52,50 +101,18 @@ class GalleryService {
     }
 
     try {
-      // Try to create table if it doesn't exist
-      console.log('🔧 Ensuring galleries table exists...');
+      const health = await this.checkDatabaseHealth();
       
-      // Test if table exists by trying to select from it
-      const { data, error } = await supabaseService.client
-        .from(this.GALLERIES_TABLE)
-        .select('id')
-        .limit(1);
+      if (!health.tablesExist) {
+        console.warn('⚠️ Database tables do not exist. Please run the SQL setup script.');
+        console.log('📝 Execute the SUPABASE_FOLDERS_UPDATE.sql file in your Supabase SQL Editor.');
+      }
       
-      if (error && error.code === 'PGRST116') { // Table not found
-        console.log('📋 Creating galleries table...');
-        
-        // Create table using SQL
-        const { error: createError } = await supabaseService.client.rpc('create_galleries_table');
-        
-        if (createError) {
-          console.warn('⚠️  Could not create galleries table automatically:', createError.message);
-          console.log('📝 Please create the table manually in Supabase dashboard:');
-          console.log(`
-CREATE TABLE IF NOT EXISTS galleries (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  description TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  is_public BOOLEAN DEFAULT TRUE,
-  password TEXT,
-  bucket_folder TEXT,
-  bucket_name TEXT DEFAULT 'photos',
-  photo_count INTEGER DEFAULT 0,
-  view_count INTEGER DEFAULT 0,
-  allow_comments BOOLEAN DEFAULT TRUE,
-  allow_favorites BOOLEAN DEFAULT TRUE
-);
-          `);
-        } else {
-          console.log('✅ Galleries table created successfully');
-        }
-      } else {
-        console.log('✅ Galleries table already exists');
+      if (!health.functionsExist) {
+        console.warn('⚠️ Database functions do not exist. Please run the SQL setup script.');
       }
     } catch (error) {
-      console.error('❌ Error ensuring table exists:', error);
-      // Continue anyway - user might need to create table manually
+      console.error('❌ Error checking database health:', error);
     }
   }
 
@@ -106,6 +123,12 @@ CREATE TABLE IF NOT EXISTS galleries (
     }
 
     try {
+      const health = await this.checkDatabaseHealth();
+      if (!health.tablesExist) {
+        console.warn('Cannot migrate - database tables not ready');
+        return;
+      }
+
       console.log('🔄 Checking for local galleries to migrate...');
       
       const localData = localStorage.getItem(this.LOCAL_STORAGE_KEY);
@@ -174,6 +197,13 @@ CREATE TABLE IF NOT EXISTS galleries (
       }
 
       await this.ensureTableExists();
+      
+      const health = await this.checkDatabaseHealth();
+      if (!health.tablesExist) {
+        console.warn('⚠️ Database not ready, falling back to local storage');
+        return this.getLocalGalleries();
+      }
+
       await this.migrateLocalGalleries();
 
       console.log('📂 Fetching galleries from Supabase...');
@@ -243,6 +273,16 @@ CREATE TABLE IF NOT EXISTS galleries (
       }
 
       await this.ensureTableExists();
+      
+      const health = await this.checkDatabaseHealth();
+      if (!health.tablesExist) {
+        console.warn('⚠️ Database not ready, checking local storage');
+        const galleries = await this.getLocalGalleries();
+        const found = galleries.find(g => g.id === id) || null;
+        console.log(found ? `✅ Found gallery locally: ${found.name}` : `❌ Gallery ${id} not found locally`);
+        return found;
+      }
+
       await this.migrateLocalGalleries(); // Ensure migration is complete
 
       console.log(`📡 Fetching gallery ${id} from Supabase...`);
@@ -323,6 +363,11 @@ CREATE TABLE IF NOT EXISTS galleries (
 
       await this.ensureTableExists();
       
+      const health = await this.checkDatabaseHealth();
+      if (!health.tablesExist) {
+        return { success: false, count: 0, error: 'Database tables not ready. Please run SQL setup.' };
+      }
+      
       console.log('🔄 Syncing galleries from Supabase...');
       
       const { data, error } = await supabaseService.client
@@ -386,6 +431,11 @@ CREATE TABLE IF NOT EXISTS galleries (
       // With hardcoded credentials, always use Supabase
       if (supabaseService.isReady()) {
         await this.ensureTableExists();
+        
+        const health = await this.checkDatabaseHealth();
+        if (!health.tablesExist) {
+          throw new Error('Database tables not ready. Please run the SQL setup script.');
+        }
 
         // Insert into Supabase
         const { error } = await supabaseService.client
@@ -431,7 +481,7 @@ CREATE TABLE IF NOT EXISTS galleries (
       return newGallery;
     } catch (error) {
       console.error('Error creating gallery:', error);
-      throw new Error('Failed to create gallery');
+      throw new Error(`Failed to create gallery: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -441,6 +491,25 @@ CREATE TABLE IF NOT EXISTS galleries (
       
       if (supabaseService.isReady()) {
         await this.ensureTableExists();
+        
+        const health = await this.checkDatabaseHealth();
+        if (!health.tablesExist) {
+          console.warn('Database not ready, falling back to local storage');
+          // Fallback to local storage
+          const galleries = await this.getLocalGalleries();
+          const index = galleries.findIndex(g => g.id === id);
+          
+          if (index === -1) return null;
+          
+          galleries[index] = {
+            ...galleries[index],
+            ...updates,
+            updatedAt
+          };
+          
+          localStorage.setItem(this.LOCAL_STORAGE_KEY, JSON.stringify(galleries));
+          return galleries[index];
+        }
 
         // Transform updates to Supabase format
         const supabaseUpdates: any = {
@@ -516,7 +585,23 @@ CREATE TABLE IF NOT EXISTS galleries (
       if (!gallery) return false;
 
       if (supabaseService.isReady()) {
-        // Delete photos from Supabase storage first
+        const health = await this.checkDatabaseHealth();
+        if (health.tablesExist) {
+          // Delete from Supabase database first (cascade will handle photos)
+          const { error } = await supabaseService.client
+            .from(this.GALLERIES_TABLE)
+            .delete()
+            .eq('id', id);
+
+          if (error) {
+            console.error('Error deleting gallery from Supabase:', error);
+            return false;
+          }
+
+          console.log('✅ Gallery deleted from Supabase:', id);
+        }
+
+        // Delete photos from Supabase storage
         if (gallery.bucketName && gallery.bucketFolder) {
           try {
             const files = await supabaseService.listFiles(gallery.bucketName, gallery.bucketFolder);
@@ -529,19 +614,6 @@ CREATE TABLE IF NOT EXISTS galleries (
             console.warn('⚠️ Could not delete Supabase photos:', error);
           }
         }
-
-        // Delete gallery from Supabase
-        const { error } = await supabaseService.client
-          .from(this.GALLERIES_TABLE)
-          .delete()
-          .eq('id', id);
-
-        if (error) {
-          console.error('Error deleting gallery from Supabase:', error);
-          return false;
-        }
-
-        console.log('✅ Gallery deleted from Supabase:', id);
       } else {
         // Fallback to local storage
         const galleries = await this.getLocalGalleries();
@@ -557,6 +629,109 @@ CREATE TABLE IF NOT EXISTS galleries (
     } catch (error) {
       console.error('Error deleting gallery:', error);
       return false;
+    }
+  }
+
+  // NEW: Subfolder Management with better error handling
+  async getGallerySubfolders(galleryId: string): Promise<SubfolderInfo[]> {
+    try {
+      if (!supabaseService.isReady()) {
+        // Local fallback - scan photos in local storage
+        const photos = await this.getPhotos(galleryId);
+        const subfolderMap = new Map<string, SubfolderInfo>();
+        
+        photos.forEach(photo => {
+          if (photo.subfolder) {
+            const existing = subfolderMap.get(photo.subfolder);
+            if (existing) {
+              existing.photoCount++;
+              if (photo.uploadedAt > existing.lastUpdated) {
+                existing.lastUpdated = photo.uploadedAt;
+              }
+            } else {
+              subfolderMap.set(photo.subfolder, {
+                name: photo.subfolder,
+                photoCount: 1,
+                lastUpdated: photo.uploadedAt
+              });
+            }
+          }
+        });
+        
+        return Array.from(subfolderMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+      }
+
+      const health = await this.checkDatabaseHealth();
+      if (!health.functionsExist) {
+        console.warn('Database function get_gallery_subfolders not available, using fallback');
+        // Fallback to manual query if function doesn't exist
+        return await this.getSubfoldersFallback(galleryId);
+      }
+
+      // Use Supabase function if available
+      const { data, error } = await supabaseService.client
+        .rpc('get_gallery_subfolders', { gallery_id_param: galleryId });
+
+      if (error) {
+        console.error('Error fetching subfolders:', error);
+        // Use fallback method
+        return await this.getSubfoldersFallback(galleryId);
+      }
+
+      return (data || []).map((row: any) => ({
+        name: row.subfolder,
+        photoCount: parseInt(row.photo_count),
+        lastUpdated: new Date().toISOString() // Fallback date
+      }));
+      
+    } catch (error) {
+      console.error('Error getting gallery subfolders:', error);
+      return [];
+    }
+  }
+
+  // Fallback method to get subfolders without using the SQL function
+  private async getSubfoldersFallback(galleryId: string): Promise<SubfolderInfo[]> {
+    try {
+      if (!supabaseService.isReady()) {
+        return [];
+      }
+
+      const health = await this.checkDatabaseHealth();
+      if (!health.tablesExist) {
+        return [];
+      }
+
+      // Manual query to group by subfolder
+      const { data, error } = await supabaseService.client
+        .from(this.PHOTOS_TABLE)
+        .select('subfolder')
+        .eq('gallery_id', galleryId)
+        .not('subfolder', 'is', null)
+        .not('subfolder', 'eq', '');
+
+      if (error) {
+        console.error('Error in subfolder fallback query:', error);
+        return [];
+      }
+
+      // Count manually since we can't use SQL aggregation
+      const subfolderCounts = new Map<string, number>();
+      (data || []).forEach(row => {
+        if (row.subfolder) {
+          subfolderCounts.set(row.subfolder, (subfolderCounts.get(row.subfolder) || 0) + 1);
+        }
+      });
+
+      return Array.from(subfolderCounts.entries()).map(([name, count]) => ({
+        name,
+        photoCount: count,
+        lastUpdated: new Date().toISOString()
+      })).sort((a, b) => a.name.localeCompare(b.name));
+
+    } catch (error) {
+      console.error('Error in subfolder fallback:', error);
+      return [];
     }
   }
 
@@ -624,11 +799,8 @@ CREATE TABLE IF NOT EXISTS galleries (
     }
   }
 
-  // Rest of the methods remain the same...
-  // (Photo management, upload, delete, stats, etc.)
-
   // Photo Management with Supabase Integration
-  async getPhotos(galleryId: string): Promise<Photo[]> {
+  async getPhotos(galleryId: string, subfolder?: string): Promise<Photo[]> {
     try {
       const gallery = await this.getGallery(galleryId);
       if (!gallery) {
@@ -636,17 +808,30 @@ CREATE TABLE IF NOT EXISTS galleries (
         return [];
       }
 
-      // If Supabase is configured, fetch photos from storage
-      if (supabaseService.isReady() && gallery.bucketName && gallery.bucketFolder) {
-        console.log(`📂 Fetching photos from Supabase: ${gallery.bucketName}/${gallery.bucketFolder}`);
-        return await this.fetchPhotosFromSupabase(gallery);
+      // If Supabase is configured, fetch photos from database
+      if (supabaseService.isReady()) {
+        const health = await this.checkDatabaseHealth();
+        if (health.tablesExist) {
+          console.log(`📂 Fetching photos from Supabase database for gallery: ${galleryId}${subfolder ? `, subfolder: ${subfolder}` : ''}`);
+          return await this.fetchPhotosFromSupabaseDB(galleryId, subfolder);
+        } else {
+          console.warn('Database not ready, using fallback method');
+          return await this.fetchPhotosFromSupabase(gallery);
+        }
       }
 
       // Fallback to cached photos
       const stored = localStorage.getItem(`${this.PHOTOS_KEY}-${galleryId}`);
       if (stored) {
         const photos = JSON.parse(stored);
-        return Array.isArray(photos) ? photos : [];
+        let filteredPhotos = Array.isArray(photos) ? photos : [];
+        
+        // Filter by subfolder if specified
+        if (subfolder) {
+          filteredPhotos = filteredPhotos.filter((photo: Photo) => photo.subfolder === subfolder);
+        }
+        
+        return filteredPhotos;
       }
 
       console.log(`No photos found for gallery ${galleryId}`);
@@ -658,6 +843,51 @@ CREATE TABLE IF NOT EXISTS galleries (
     }
   }
 
+  // NEW: Fetch photos from Supabase database (with subfolder support)
+  private async fetchPhotosFromSupabaseDB(galleryId: string, subfolder?: string): Promise<Photo[]> {
+    try {
+      let query = supabaseService.client
+        .from(this.PHOTOS_TABLE)
+        .select('*')
+        .eq('gallery_id', galleryId)
+        .order('created_at', { ascending: false });
+
+      // Filter by subfolder if specified
+      if (subfolder) {
+        query = query.eq('subfolder', subfolder);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error fetching photos from database:', error);
+        return [];
+      }
+
+      const photos: Photo[] = (data || []).map(row => ({
+        id: row.id,
+        galleryId: row.gallery_id,
+        name: row.name,
+        originalName: row.name, // Assuming name is the original name
+        url: row.url,
+        description: row.description || '',
+        uploadedAt: row.created_at,
+        size: row.file_size || 0,
+        mimeType: row.file_type || 'image/jpeg',
+        bucketPath: `${galleryId}/${row.subfolder ? `${row.subfolder}/` : ''}${row.name}`,
+        subfolder: row.subfolder || undefined
+      }));
+
+      console.log(`✅ Loaded ${photos.length} photos from Supabase database`);
+      return photos;
+      
+    } catch (error) {
+      console.error('Error fetching photos from Supabase database:', error);
+      return [];
+    }
+  }
+
+  // Legacy method for backward compatibility
   private async fetchPhotosFromSupabase(gallery: Gallery): Promise<Photo[]> {
     try {
       if (!gallery.bucketName || !gallery.bucketFolder) {
@@ -700,11 +930,14 @@ CREATE TABLE IF NOT EXISTS galleries (
     }
   }
 
-  // Upload photos to Supabase
+  // Upload photos to Supabase WITH SUBFOLDER SUPPORT
   async uploadPhotos(
     galleryId: string, 
     files: File[],
-    onProgress?: (completed: number, total: number) => void
+    options?: {
+      subfolder?: string;
+      onProgress?: (completed: number, total: number) => void;
+    }
   ): Promise<{ successful: Photo[]; failed: { file: File; error: string }[] }> {
     const gallery = await this.getGallery(galleryId);
     if (!gallery) {
@@ -721,6 +954,7 @@ CREATE TABLE IF NOT EXISTS galleries (
 
     const successful: Photo[] = [];
     const failed: { file: File; error: string }[] = [];
+    const subfolder = options?.subfolder?.trim() || undefined;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -734,9 +968,12 @@ CREATE TABLE IF NOT EXISTS galleries (
 
         // Generate unique filename
         const uniqueName = supabaseService.constructor.generateUniqueFilename(file.name);
-        const filePath = `${gallery.bucketFolder}/${uniqueName}`;
+        
+        // Build file path with subfolder support
+        const subfolderPath = subfolder ? `${subfolder}/` : '';
+        const filePath = `${gallery.bucketFolder}/${subfolderPath}${uniqueName}`;
 
-        // Upload to Supabase
+        // Upload to Supabase Storage
         const uploadResult = await supabaseService.uploadFile(
           gallery.bucketName,
           filePath,
@@ -759,8 +996,42 @@ CREATE TABLE IF NOT EXISTS galleries (
               uploadedAt: new Date().toISOString(),
               size: file.size,
               mimeType: file.type,
-              bucketPath: filePath
+              bucketPath: filePath,
+              subfolder: subfolder
             };
+
+            // Try to insert photo record into database if tables exist
+            const health = await this.checkDatabaseHealth();
+            if (health.tablesExist) {
+              try {
+                const photoRecord = {
+                  gallery_id: galleryId,
+                  name: uniqueName,
+                  url: publicUrl,
+                  description: null,
+                  subfolder: subfolder || null,
+                  file_size: file.size,
+                  file_type: file.type
+                };
+
+                const { data: insertedPhoto, error: insertError } = await supabaseService.client
+                  .from(this.PHOTOS_TABLE)
+                  .insert([photoRecord])
+                  .select()
+                  .single();
+
+                if (insertedPhoto) {
+                  photo.id = insertedPhoto.id;
+                }
+
+                if (insertError) {
+                  console.warn('Error inserting photo record:', insertError);
+                  // Continue anyway since file was uploaded successfully
+                }
+              } catch (dbError) {
+                console.warn('Database insertion failed, continuing with file upload:', dbError);
+              }
+            }
 
             successful.push(photo);
           } else {
@@ -774,7 +1045,7 @@ CREATE TABLE IF NOT EXISTS galleries (
         failed.push({ file, error: 'Upload error' });
       }
 
-      onProgress?.(i + 1, files.length);
+      options?.onProgress?.(i + 1, files.length);
     }
 
     // Update gallery photo count and clear cache
@@ -791,24 +1062,35 @@ CREATE TABLE IF NOT EXISTS galleries (
 
       const photos = await this.getPhotos(galleryId);
       const photo = photos.find(p => p.id === photoId);
-      
       if (!photo) return false;
 
-      // Delete from Supabase if configured
-      if (supabaseService.isReady() && photo.bucketPath && gallery.bucketName) {
-        const deleteResult = await supabaseService.deleteFile(gallery.bucketName, photo.bucketPath);
-        if (!deleteResult.success) {
-          console.error('Failed to delete from Supabase:', deleteResult.error);
-          return false;
+      if (supabaseService.isReady()) {
+        const health = await this.checkDatabaseHealth();
+        if (health.tablesExist) {
+          // Delete from Supabase database first
+          const { error: dbError } = await supabaseService.client
+            .from(this.PHOTOS_TABLE)
+            .delete()
+            .eq('id', photoId);
+
+          if (dbError) {
+            console.error('Error deleting photo from database:', dbError);
+          }
+        }
+
+        // Delete from Supabase storage
+        if (photo.bucketPath && gallery.bucketName) {
+          const deleteResult = await supabaseService.deleteFile(gallery.bucketName, photo.bucketPath);
+          if (!deleteResult.success) {
+            console.warn('Could not delete file from storage:', deleteResult.error);
+          }
         }
       }
 
-      // Clear cache to force refresh
-      localStorage.removeItem(`${this.PHOTOS_KEY}-${galleryId}`);
-      
-      // Update gallery photo count
+      // Update gallery photo count and clear cache
       await this.updateGalleryPhotoCount(galleryId);
-      
+      localStorage.removeItem(`${this.PHOTOS_KEY}-${galleryId}`);
+
       return true;
     } catch (error) {
       console.error('Error deleting photo:', error);
@@ -818,8 +1100,46 @@ CREATE TABLE IF NOT EXISTS galleries (
 
   async deleteAllPhotos(galleryId: string): Promise<boolean> {
     try {
+      const gallery = await this.getGallery(galleryId);
+      if (!gallery) return false;
+
+      if (supabaseService.isReady()) {
+        const health = await this.checkDatabaseHealth();
+        if (health.tablesExist) {
+          // Delete all photos from database
+          const { error: dbError } = await supabaseService.client
+            .from(this.PHOTOS_TABLE)
+            .delete()
+            .eq('gallery_id', galleryId);
+
+          if (dbError) {
+            console.error('Error deleting photos from database:', dbError);
+          }
+        }
+
+        // Delete from Supabase storage
+        if (gallery.bucketName && gallery.bucketFolder) {
+          try {
+            const files = await supabaseService.listFiles(gallery.bucketName, gallery.bucketFolder);
+            for (const file of files) {
+              const filePath = `${gallery.bucketFolder}/${file.name}`;
+              const deleteResult = await supabaseService.deleteFile(gallery.bucketName, filePath);
+              if (!deleteResult.success) {
+                console.warn('Could not delete file:', filePath, deleteResult.error);
+              }
+            }
+          } catch (error) {
+            console.warn('Could not list/delete files from storage:', error);
+          }
+        }
+      }
+
+      // Clear local cache
       localStorage.removeItem(`${this.PHOTOS_KEY}-${galleryId}`);
-      await this.updateGalleryPhotoCount(galleryId);
+
+      // Update gallery photo count
+      await this.updateGallery(galleryId, { photoCount: 0 });
+
       return true;
     } catch (error) {
       console.error('Error deleting all photos:', error);
@@ -827,33 +1147,9 @@ CREATE TABLE IF NOT EXISTS galleries (
     }
   }
 
-  // Bucket Management
-  async updateGalleryBucketFolder(galleryId: string, bucketFolder: string): Promise<boolean> {
-    try {
-      const gallery = await this.updateGallery(galleryId, { bucketFolder });
-      
-      if (gallery) {
-        // Clear photo cache to force refresh from new folder
-        localStorage.removeItem(`${this.PHOTOS_KEY}-${galleryId}`);
-        
-        // Create new folder in Supabase if configured
-        if (supabaseService.isReady() && gallery.bucketName) {
-          await supabaseService.createFolder(gallery.bucketName, bucketFolder);
-        }
-        
-        return true;
-      }
-      
-      return false;
-    } catch (error) {
-      console.error('Error updating bucket folder:', error);
-      return false;
-    }
-  }
-
   // Utility methods
   private generateId(): string {
-    return Math.random().toString(36).substring(2, 15);
+    return Math.random().toString(36).substring(2, 9);
   }
 
   private async updateGalleryPhotoCount(galleryId: string): Promise<void> {
@@ -861,161 +1157,44 @@ CREATE TABLE IF NOT EXISTS galleries (
       const photos = await this.getPhotos(galleryId);
       await this.updateGallery(galleryId, { photoCount: photos.length });
     } catch (error) {
-      console.error('Error updating photo count:', error);
+      console.error('Error updating gallery photo count:', error);
     }
   }
 
-  // Statistics
+  // Check if Supabase is configured
+  isSupabaseConfigured(): boolean {
+    return supabaseService.isReady();
+  }
+
+  // Get gallery statistics
   async getGalleryStats(galleryId: string): Promise<{
     photoCount: number;
     totalSize: number;
-    lastUpdated: string;
-    bucketFolder: string;
-    bucketName: string;
-    isPasswordProtected: boolean;
+    subfolders: SubfolderInfo[];
+    lastUpload?: string;
   }> {
     try {
       const photos = await this.getPhotos(galleryId);
-      const gallery = await this.getGallery(galleryId);
+      const subfolders = await this.getGallerySubfolders(galleryId);
       
+      const totalSize = photos.reduce((sum, photo) => sum + photo.size, 0);
+      const lastUpload = photos.length > 0 
+        ? photos.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())[0].uploadedAt
+        : undefined;
+
       return {
         photoCount: photos.length,
-        totalSize: photos.reduce((sum, photo) => sum + photo.size, 0),
-        lastUpdated: gallery?.updatedAt || new Date().toISOString(),
-        bucketFolder: gallery?.bucketFolder || 'unknown',
-        bucketName: gallery?.bucketName || this.DEFAULT_BUCKET,
-        isPasswordProtected: !!(gallery?.password)
+        totalSize,
+        subfolders,
+        lastUpload
       };
     } catch (error) {
       console.error('Error getting gallery stats:', error);
       return {
         photoCount: 0,
         totalSize: 0,
-        lastUpdated: new Date().toISOString(),
-        bucketFolder: 'unknown',
-        bucketName: this.DEFAULT_BUCKET,
-        isPasswordProtected: false
-      };
-    }
-  }
-
-  // Search and filter
-  async searchPhotos(galleryId: string, query: string): Promise<Photo[]> {
-    try {
-      const photos = await this.getPhotos(galleryId);
-      const lowercaseQuery = query.toLowerCase();
-      
-      return photos.filter(photo => 
-        photo.name.toLowerCase().includes(lowercaseQuery) ||
-        photo.description?.toLowerCase().includes(lowercaseQuery) ||
-        photo.originalName.toLowerCase().includes(lowercaseQuery)
-      );
-    } catch (error) {
-      console.error('Error searching photos:', error);
-      return [];
-    }
-  }
-
-  // Validation
-  validateBucketFolder(folder: string): { isValid: boolean; error?: string } {
-    if (!folder || folder.trim().length === 0) {
-      return { isValid: false, error: 'Bucket folder cannot be empty' };
-    }
-
-    // Check for valid characters (alphanumeric, hyphens, underscores, forward slashes)
-    const validPattern = /^[a-zA-Z0-9/_-]+$/;
-    if (!validPattern.test(folder)) {
-      return { isValid: false, error: 'Bucket folder can only contain letters, numbers, hyphens, underscores, and forward slashes' };
-    }
-
-    // Check length
-    if (folder.length > 100) {
-      return { isValid: false, error: 'Bucket folder path is too long (max 100 characters)' };
-    }
-
-    // Check for invalid patterns
-    if (folder.startsWith('/') || folder.endsWith('/')) {
-      return { isValid: false, error: 'Bucket folder cannot start or end with a forward slash' };
-    }
-
-    if (folder.includes('//')) {
-      return { isValid: false, error: 'Bucket folder cannot contain consecutive forward slashes' };
-    }
-
-    return { isValid: true };
-  }
-
-  // Supabase connection management (simplified - always configured now)
-  async testSupabaseConnection(): Promise<boolean> {
-    return await supabaseService.testConnection();
-  }
-
-  isSupabaseConfigured(): boolean {
-    return supabaseService.isReady();
-  }
-
-  // Manual sync methods for admin panel
-  async syncFromSupabase(): Promise<{ success: boolean; count: number; error?: string }> {
-    try {
-      if (!supabaseService.isReady()) {
-        return { success: false, count: 0, error: 'Supabase not configured' };
-      }
-
-      await this.ensureTableExists();
-      const galleries = await this.getGalleries();
-      
-      return { 
-        success: true, 
-        count: galleries.length 
-      };
-    } catch (error) {
-      console.error('Error syncing from Supabase:', error);
-      return { 
-        success: false, 
-        count: 0, 
-        error: error instanceof Error ? error.message : 'Sync failed' 
-      };
-    }
-  }
-
-  async getConnectionStatus(): Promise<{
-    isConnected: boolean;
-    isTableReady: boolean;
-    localGalleries: number;
-    remoteGalleries: number;
-  }> {
-    try {
-      const isConnected = supabaseService.isReady();
-      let isTableReady = false;
-      let remoteGalleries = 0;
-
-      if (isConnected) {
-        try {
-          const { data, error } = await supabaseService.client
-            .from(this.GALLERIES_TABLE)
-            .select('id', { count: 'exact' });
-          
-          isTableReady = !error;
-          remoteGalleries = data?.length || 0;
-        } catch (error) {
-          isTableReady = false;
-        }
-      }
-
-      const localGalleries = (await this.getLocalGalleries()).length;
-
-      return {
-        isConnected,
-        isTableReady,
-        localGalleries,
-        remoteGalleries
-      };
-    } catch (error) {
-      return {
-        isConnected: false,
-        isTableReady: false,
-        localGalleries: 0,
-        remoteGalleries: 0
+        subfolders: [],
+        lastUpload: undefined
       };
     }
   }

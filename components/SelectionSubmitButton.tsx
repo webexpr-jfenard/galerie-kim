@@ -16,7 +16,7 @@ import {
   FileText,
   Loader
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "sonner@2.0.3";
 import { selectionService } from "../services/selectionService";
 import { favoritesService } from "../services/favoritesService";
 

@@ -10,10 +10,14 @@ import {
   Heart, 
   MessageSquare, 
   Search,
-  Send
+  Send,
+  Filter,
+  Folder,
+  FolderOpen,
+  Grid
 } from "lucide-react";
-import { toast } from "sonner";
-import { galleryService } from "../services/galleryService";
+import { toast } from "sonner@2.0.3";
+import { galleryService, SubfolderInfo } from "../services/galleryService";
 import { favoritesService } from "../services/favoritesService";
 import type { Gallery, Photo } from "../services/galleryService";
 import type { FavoritePhoto, Comment } from "../services/favoritesService";
@@ -29,6 +33,11 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [needsAuth, setNeedsAuth] = useState(false);
   
+  // Subfolders and filtering
+  const [subfolders, setSubfolders] = useState<SubfolderInfo[]>([]);
+  const [selectedSubfolder, setSelectedSubfolder] = useState<string | undefined>(undefined);
+  const [showSubfolderFilter, setShowSubfolderFilter] = useState(false);
+  
   // Selection (shared across all devices) and comments
   const [selection, setSelection] = useState<Set<string>>(new Set()); // Shared favorites
   const [comments, setComments] = useState<Comment[]>([]);
@@ -43,13 +52,13 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
   // Load gallery data
   useEffect(() => {
     loadGalleryData();
-  }, [galleryId]);
+  }, [galleryId, selectedSubfolder]); // Reload when subfolder filter changes
 
   const loadGalleryData = async () => {
     try {
       setIsLoading(true);
       
-      console.log(`🔍 Loading gallery data for: ${galleryId}`);
+      console.log(`🔍 Loading gallery data for: ${galleryId}${selectedSubfolder ? `, subfolder: ${selectedSubfolder}` : ''}`);
       
       // Load gallery info
       let galleryData = await galleryService.getGallery(galleryId);
@@ -94,9 +103,20 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
 
       setGallery(galleryData);
 
-      // Load photos
+      // Load subfolders
+      console.log('📁 Loading subfolders...');
+      const subfolderList = await galleryService.getGallerySubfolders(galleryId);
+      setSubfolders(subfolderList);
+      console.log(`✅ Loaded ${subfolderList.length} subfolders`);
+
+      // Show subfolder filter if there are subfolders
+      if (subfolderList.length > 0 && !showSubfolderFilter) {
+        setShowSubfolderFilter(true);
+      }
+
+      // Load photos (filtered by subfolder if selected)
       console.log('📸 Loading photos...');
-      const photoList = await galleryService.getPhotos(galleryId);
+      const photoList = await galleryService.getPhotos(galleryId, selectedSubfolder);
       console.log(`✅ Loaded ${photoList.length} photos`);
       setPhotos(photoList);
 
@@ -221,8 +241,20 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
   // Filter photos based on search
   const filteredPhotos = photos.filter(photo =>
     photo.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    photo.originalName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     photo.description?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Get display name for photo (prioritize original name)
+  const getPhotoDisplayName = (photo: Photo) => {
+    return photo.originalName || photo.name;
+  };
+
+  // Handle subfolder filter change
+  const handleSubfolderFilterChange = (subfolder: string | undefined) => {
+    setSelectedSubfolder(subfolder);
+    setSearchTerm(''); // Clear search when changing subfolder
+  };
 
   // Auth dialog
   if (needsAuth) {
@@ -265,7 +297,7 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
   if (!gallery) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-md px-4">
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <Search className="h-8 w-8 text-red-600" />
           </div>
@@ -318,53 +350,118 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
       {/* Header */}
       <div className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-40">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.appRouter.navigateTo('/')}
-              >
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Accueil
-              </Button>
-              <div>
-                <h1 className="text-2xl font-bold">{gallery.name}</h1>
-                <p className="text-sm text-muted-foreground">
-                  {filteredPhotos.length} photos • {selection.size} sélectionnées • {comments.length} commentaires
-                </p>
+          {/* Mobile-first responsive header */}
+          <div className="flex flex-col space-y-4 lg:space-y-0">
+            {/* Top row: Back button, title, and actions */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 lg:gap-4 min-w-0 flex-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.appRouter.navigateTo('/')}
+                  className="shrink-0"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-1 lg:mr-2" />
+                  <span className="hidden sm:inline">Accueil</span>
+                </Button>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-lg lg:text-2xl font-bold truncate">{gallery.name}</h1>
+                  <div className="flex flex-wrap items-center gap-2 text-xs lg:text-sm text-muted-foreground">
+                    <span>{filteredPhotos.length} photos</span>
+                    <span>•</span>
+                    <span>{selection.size} sélectionnées</span>
+                    <span>•</span>
+                    <span>{comments.length} commentaires</span>
+                    {selectedSubfolder && (
+                      <>
+                        <span>•</span>
+                        <Badge variant="outline" className="text-xs">
+                          <Folder className="h-3 w-3 mr-1" />
+                          {selectedSubfolder}
+                        </Badge>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Action buttons - responsive */}
+              <div className="flex items-center gap-2 lg:gap-3 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.appRouter.navigateTo(`/favorites/${galleryId}`)}
+                  className="hidden sm:flex"
+                >
+                  <Heart className="h-4 w-4 mr-2" />
+                  Ma sélection ({selection.size})
+                </Button>
+                
+                {/* Mobile favorite button */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.appRouter.navigateTo(`/favorites/${galleryId}`)}
+                  className="sm:hidden"
+                >
+                  <Heart className="h-4 w-4 mr-1" />
+                  {selection.size}
+                </Button>
+                
+                {/* Submit Selection Button */}
+                <SelectionSubmitButton 
+                  galleryId={galleryId}
+                  galleryName={gallery.name}
+                  variant="default"
+                  size="sm"
+                />
               </div>
             </div>
-            
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.appRouter.navigateTo(`/favorites/${galleryId}`)}
-              >
-                <Heart className="h-4 w-4 mr-2" />
-                Ma sélection ({selection.size})
-              </Button>
-              
-              {/* Submit Selection Button */}
-              <SelectionSubmitButton 
-                galleryId={galleryId}
-                galleryName={gallery.name}
-                variant="default"
-                size="sm"
-              />
-            </div>
-          </div>
 
-          {/* Search */}
-          <div className="relative max-w-md">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Rechercher des photos..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
+            {/* Second row: Search and filters */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Search */}
+              <div className="relative flex-1">
+                <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Rechercher des photos..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {/* Subfolder filter */}
+              {showSubfolderFilter && subfolders.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelectedSubfolder(undefined)}
+                    className={`${!selectedSubfolder ? 'bg-primary text-primary-foreground' : ''}`}
+                  >
+                    <Grid className="h-4 w-4 mr-1" />
+                    <span className="hidden sm:inline">Toutes</span>
+                  </Button>
+                  
+                  {subfolders.map((subfolder) => (
+                    <Button
+                      key={subfolder.name}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSubfolderFilterChange(subfolder.name)}
+                      className={`${selectedSubfolder === subfolder.name ? 'bg-primary text-primary-foreground' : ''}`}
+                    >
+                      <Folder className="h-4 w-4 mr-1" />
+                      <span className="max-w-[100px] truncate">{subfolder.name}</span>
+                      <Badge variant="secondary" className="ml-1 text-xs">
+                        {subfolder.photoCount}
+                      </Badge>
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -374,12 +471,23 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
         {filteredPhotos.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-xl text-muted-foreground mb-4">
-              {searchTerm ? 'Aucune photo ne correspond à votre recherche.' : 'Aucune photo dans cette galerie pour le moment.'}
+              {searchTerm ? 'Aucune photo ne correspond à votre recherche.' : 
+               selectedSubfolder ? `Aucune photo dans le sous-dossier "${selectedSubfolder}".` :
+               'Aucune photo dans cette galerie pour le moment.'}
             </p>
-            {searchTerm && (
-              <Button variant="outline" onClick={() => setSearchTerm('')}>
-                Effacer la recherche
-              </Button>
+            {(searchTerm || selectedSubfolder) && (
+              <div className="space-x-2">
+                {searchTerm && (
+                  <Button variant="outline" onClick={() => setSearchTerm('')}>
+                    Effacer la recherche
+                  </Button>
+                )}
+                {selectedSubfolder && (
+                  <Button variant="outline" onClick={() => setSelectedSubfolder(undefined)}>
+                    Voir toutes les photos
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         ) : (
@@ -390,10 +498,15 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
                 <div className="photo-container" onClick={() => openLightbox(index)}>
                   <img
                     src={photo.url}
-                    alt={photo.name}
+                    alt={getPhotoDisplayName(photo)}
                     loading="lazy"
                     className="photo-image"
                   />
+
+                  {/* Photo name overlay - NEW */}
+                  <div className="photo-name-overlay">
+                    {getPhotoDisplayName(photo)}
+                  </div>
 
                   {/* Selection indicator */}
                   <button
@@ -415,6 +528,14 @@ export function PhotoGallery({ galleryId }: PhotoGalleryProps) {
                     <div className="comment-indicator">
                       <MessageSquare className="h-3 w-3" />
                       {photoCommentCounts[photo.id]}
+                    </div>
+                  )}
+
+                  {/* Subfolder indicator */}
+                  {photo.subfolder && (
+                    <div className="subfolder-indicator">
+                      <Folder className="h-3 w-3 mr-1" />
+                      {photo.subfolder}
                     </div>
                   )}
 

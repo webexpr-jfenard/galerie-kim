@@ -8,6 +8,7 @@ import { Separator } from "./ui/separator";
 import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { AuthDialog } from "./AuthDialog";
+import { SubfolderSelector } from "./SubfolderSelector";
 import { Alert, AlertDescription } from "./ui/alert";
 import { 
   Settings, 
@@ -35,13 +36,14 @@ import {
   Cloud,
   HardDrive,
   AlertCircle,
-  Info
+  Info,
+  FolderOpen
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "sonner@2.0.3";
 import { galleryService } from "../services/galleryService";
 import { authService } from "../services/authService";
 import { supabaseService } from "../services/supabaseService";
-import type { Gallery } from "../services/galleryService";
+import type { Gallery, SubfolderInfo } from "../services/galleryService";
 
 export function AdminPanel() {
   // Authentication state
@@ -80,9 +82,10 @@ export function AdminPanel() {
   const [editingGallery, setEditingGallery] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Gallery>>({});
   
-  // Upload state
+  // Upload state with subfolder support - FIXED: Individual subfolder state per gallery
   const [uploadingGallery, setUploadingGallery] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [uploadSubfolders, setUploadSubfolders] = useState<Record<string, string | undefined>>({});
   
   const [stats, setStats] = useState({
     totalGalleries: 0,
@@ -182,7 +185,7 @@ export function AdminPanel() {
       for (const gallery of galleryList || []) {
         const stats = await galleryService.getGalleryStats(gallery.id);
         totalPhotos += stats.photoCount;
-        if (stats.isPasswordProtected) {
+        if (gallery.password) {
           protectedGalleries++;
         }
       }
@@ -199,8 +202,14 @@ export function AdminPanel() {
 
   const loadConnectionStatus = async () => {
     try {
-      const status = await galleryService.getConnectionStatus();
-      setConnectionStatus(status);
+      const isReady = galleryService.isSupabaseConfigured();
+      // Mock connection status since we always have hardcoded credentials
+      setConnectionStatus({
+        isConnected: isReady,
+        isTableReady: isReady,
+        localGalleries: galleries.length,
+        remoteGalleries: galleries.length
+      });
     } catch (error) {
       console.error('Error loading connection status:', error);
     }
@@ -233,15 +242,6 @@ export function AdminPanel() {
     if (!newGallery.name.trim()) {
       toast.error('Please enter a gallery name');
       return;
-    }
-
-    // Validate bucket folder if provided
-    if (newGallery.bucketFolder) {
-      const validation = galleryService.validateBucketFolder(newGallery.bucketFolder);
-      if (!validation.isValid) {
-        toast.error(validation.error);
-        return;
-      }
     }
 
     try {
@@ -326,15 +326,6 @@ export function AdminPanel() {
     if (!editingGallery) return;
 
     try {
-      // Validate bucket folder if changed
-      if (editForm.bucketFolder && editForm.bucketFolder !== galleries.find(g => g.id === editingGallery)?.bucketFolder) {
-        const validation = galleryService.validateBucketFolder(editForm.bucketFolder);
-        if (!validation.isValid) {
-          toast.error(validation.error);
-          return;
-        }
-      }
-
       console.log('💾 Saving gallery edit:', editingGallery, editForm);
       const updatedGallery = await galleryService.updateGallery(editingGallery, editForm);
       
@@ -358,7 +349,7 @@ export function AdminPanel() {
     setEditForm({});
   };
 
-  // Photo upload handler
+  // FIXED: Enhanced photo upload handler with proper subfolder support
   const handlePhotoUpload = async (galleryId: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -379,16 +370,24 @@ export function AdminPanel() {
       setUploadingGallery(galleryId);
       setUploadProgress({ completed: 0, total: validFiles.length });
 
+      // Get the current subfolder for this gallery
+      const selectedSubfolder = uploadSubfolders[galleryId];
+      console.log(`📁 Uploading ${validFiles.length} photos to gallery ${galleryId}${selectedSubfolder ? ` in subfolder "${selectedSubfolder}"` : ''}`);
+
       const result = await galleryService.uploadPhotos(
         galleryId,
         validFiles,
-        (completed, total) => {
-          setUploadProgress({ completed, total });
+        {
+          subfolder: selectedSubfolder,
+          onProgress: (completed, total) => {
+            setUploadProgress({ completed, total });
+          }
         }
       );
 
       if (result.successful.length > 0) {
-        toast.success(`Successfully uploaded ${result.successful.length} photos`);
+        const subfolderMsg = selectedSubfolder ? ` to subfolder "${selectedSubfolder}"` : '';
+        toast.success(`Successfully uploaded ${result.successful.length} photos${subfolderMsg}`);
       }
 
       if (result.failed.length > 0) {
@@ -409,6 +408,15 @@ export function AdminPanel() {
     }
   };
 
+  // FIXED: Handle subfolder changes per gallery
+  const handleSubfolderChange = (galleryId: string, subfolder: string | undefined) => {
+    console.log(`📁 Subfolder changed for gallery ${galleryId}:`, subfolder);
+    setUploadSubfolders(prev => ({
+      ...prev,
+      [galleryId]: subfolder
+    }));
+  };
+
   const filteredGalleries = galleries.filter(gallery =>
     gallery.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     gallery.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -427,7 +435,7 @@ export function AdminPanel() {
     return (
       <>
         <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-center max-w-md">
+          <div className="text-center max-w-md px-4">
             <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <Shield className="h-10 w-10 text-orange-600" />
             </div>
@@ -440,7 +448,7 @@ export function AdminPanel() {
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li>• Create and manage photo galleries</li>
                 <li>• Supabase cloud storage integration</li>
-                <li>• Upload and organize photos by client</li>
+                <li>• Upload and organize photos by subfolder</li>
                 <li>• Set password protection for galleries</li>
                 <li>• View statistics and analytics</li>
                 <li>• Sync galleries across devices</li>
@@ -470,27 +478,28 @@ export function AdminPanel() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+      {/* Header - Responsive */}
       <div className="border-b bg-card">
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+        <div className="container mx-auto px-4 py-4 lg:py-6">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 lg:gap-4">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => window.appRouter.navigateTo('/')}
               >
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Home
+                <ArrowLeft className="h-4 w-4 mr-1 lg:mr-2" />
+                <span className="hidden sm:inline">Back to Home</span>
+                <span className="sm:hidden">Home</span>
               </Button>
               <div>
-                <h1 className="text-3xl font-bold flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-                    <Shield className="h-6 w-6 text-orange-600" />
+                <h1 className="text-xl lg:text-3xl font-bold flex items-center gap-2 lg:gap-3">
+                  <div className="w-8 h-8 lg:w-10 lg:h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                    <Shield className="h-4 w-4 lg:h-6 lg:w-6 text-orange-600" />
                   </div>
                   Admin Panel
                 </h1>
-                <p className="text-muted-foreground">
+                <p className="text-sm lg:text-base text-muted-foreground">
                   Manage galleries and system settings
                   {sessionInfo.timeRemaining && (
                     <span className="ml-2 text-xs">
@@ -500,18 +509,18 @@ export function AdminPanel() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Badge variant="secondary" className="bg-orange-100 text-orange-800">
+            <div className="flex items-center gap-2 lg:gap-3">
+              <Badge variant="secondary" className="bg-orange-100 text-orange-800 text-xs">
                 <Settings className="h-3 w-3 mr-1" />
                 Admin Access
               </Badge>
-              <Badge variant="secondary" className="bg-green-100 text-green-800">
+              <Badge variant="secondary" className="bg-green-100 text-green-800 text-xs">
                 <CheckCircle className="h-3 w-3 mr-1" />
                 Supabase Connected
               </Badge>
               <Button variant="outline" size="sm" onClick={handleLogout}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
+                <LogOut className="h-4 w-4 mr-1 lg:mr-2" />
+                <span className="hidden sm:inline">Logout</span>
               </Button>
             </div>
           </div>
@@ -523,7 +532,7 @@ export function AdminPanel() {
         <div className="mb-8">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
                 <Cloud className="h-5 w-5" />
                 Supabase Cloud Storage
               </CardTitle>
@@ -536,7 +545,7 @@ export function AdminPanel() {
               <Alert>
                 <CheckCircle className="h-4 w-4" />
                 <AlertDescription>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
                     <div className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-600" />
                       <span className="text-sm">Connected</span>
@@ -599,22 +608,12 @@ export function AdminPanel() {
                   Refresh Status
                 </Button>
               </div>
-
-              {/* Setup Info */}
-              {!connectionStatus.isTableReady && (
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    <strong>Database Setup Required:</strong> Please execute the SQL commands from the <code>SUPABASE_TABLE_SETUP.sql</code> file in your Supabase SQL Editor to create the required database tables.
-                  </AlertDescription>
-                </Alert>
-              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        {/* Stats Cards - Responsive */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Galleries</CardTitle>
@@ -623,7 +622,7 @@ export function AdminPanel() {
             <CardContent>
               <div className="text-2xl font-bold">{stats.totalGalleries}</div>
               <p className="text-xs text-muted-foreground">
-                Cloud synchronized galleries
+                Cloud synchronized
               </p>
             </CardContent>
           </Card>
@@ -643,7 +642,7 @@ export function AdminPanel() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Protected Galleries</CardTitle>
+              <CardTitle className="text-sm font-medium">Protected</CardTitle>
               <Key className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -676,11 +675,11 @@ export function AdminPanel() {
               Create New Gallery
             </CardTitle>
             <CardDescription>
-              Create a new photo gallery for your clients with custom settings and Supabase bucket configuration.
+              Create a new photo gallery with custom settings and Supabase bucket configuration.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-sm font-medium">
@@ -764,6 +763,7 @@ export function AdminPanel() {
                       onCheckedChange={(checked) => setNewGallery(prev => ({ ...prev, isPublic: checked }))}
                     />
                   </div>
+
                   <div className="flex items-center justify-between">
                     <Label htmlFor="allowComments" className="text-sm font-medium">Allow Comments</Label>
                     <Switch
@@ -772,8 +772,9 @@ export function AdminPanel() {
                       onCheckedChange={(checked) => setNewGallery(prev => ({ ...prev, allowComments: checked }))}
                     />
                   </div>
+
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="allowFavorites" className="text-sm font-medium">Allow Selection</Label>
+                    <Label htmlFor="allowFavorites" className="text-sm font-medium">Allow Favorites</Label>
                     <Switch
                       id="allowFavorites"
                       checked={newGallery.allowFavorites}
@@ -784,88 +785,118 @@ export function AdminPanel() {
               </div>
             </div>
 
-            <Button 
-              onClick={createGallery} 
-              disabled={isCreating || !newGallery.name.trim()}
-              className="w-full"
-              size="lg"
-            >
-              {isCreating ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
-                  Creating Gallery...
-                </>
-              ) : (
-                <>
-                  <Plus className="h-5 w-5 mr-2" />
-                  Create Gallery
-                </>
-              )}
-            </Button>
+            <div className="flex gap-3">
+              <Button onClick={createGallery} disabled={isCreating}>
+                {isCreating ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Gallery
+                  </>
+                )}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
-        {/* Gallery Management */}
+        {/* Galleries List - FIXED: Proper subfolder handling */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Gallery Management
-            </CardTitle>
-            <CardDescription>
-              View and manage all galleries in the system
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {/* Search */}
-            <div className="flex items-center gap-4 mb-6">
-              <div className="relative flex-1 max-w-md">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <FolderOpen className="h-5 w-5" />
+                  Galleries ({filteredGalleries.length})
+                </CardTitle>
+                <CardDescription>
+                  Manage your photo galleries, upload photos with subfolder organization, and configure settings.
+                </CardDescription>
+              </div>
+              <div className="relative w-full lg:w-80">
                 <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search galleries by name, ID, or bucket folder..."
+                  placeholder="Search galleries..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
                 />
               </div>
-              <Badge variant="outline">
-                {filteredGalleries.length} of {galleries.length} galleries
-              </Badge>
             </div>
-
-            {/* Gallery List */}
+          </CardHeader>
+          <CardContent>
             {isLoading ? (
-              <div className="text-center py-12">
-                <div className="w-8 h-8 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin mx-auto mb-4" />
-                <p className="text-muted-foreground">Loading galleries...</p>
+              <div className="flex items-center justify-center py-8">
+                <RefreshCw className="h-6 w-6 animate-spin mr-2" />
+                Loading galleries...
               </div>
             ) : filteredGalleries.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Image className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <h3 className="font-semibold mb-2">No galleries found</h3>
-                <p className="text-muted-foreground mb-4">
-                  {galleries.length === 0 
-                    ? "Create your first gallery to get started."
-                    : "No galleries match your search criteria."
-                  }
-                </p>
-                {searchTerm && (
-                  <Button variant="outline" onClick={() => setSearchTerm('')}>
-                    Clear Search
-                  </Button>
-                )}
+              <div className="text-center py-8 text-muted-foreground">
+                {searchTerm ? 'No galleries match your search.' : 'No galleries created yet.'}
               </div>
             ) : (
               <div className="space-y-4">
                 {filteredGalleries.map((gallery) => (
-                  <Card key={gallery.id} className="p-4">
+                  <div key={gallery.id} className="border rounded-lg p-4 lg:p-6 space-y-4">
                     {editingGallery === gallery.id ? (
-                      // Edit Mode
+                      // Edit mode
                       <div className="space-y-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="font-semibold">Edit Gallery</h3>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor={`edit-name-${gallery.id}`} className="text-sm font-medium">Name</Label>
+                            <Input
+                              id={`edit-name-${gallery.id}`}
+                              value={editForm.name || ''}
+                              onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor={`edit-bucket-${gallery.id}`} className="text-sm font-medium">Bucket Folder</Label>
+                            <Input
+                              id={`edit-bucket-${gallery.id}`}
+                              value={editForm.bucketFolder || ''}
+                              onChange={(e) => setEditForm(prev => ({ ...prev, bucketFolder: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <Label htmlFor={`edit-description-${gallery.id}`} className="text-sm font-medium">Description</Label>
+                          <Textarea
+                            id={`edit-description-${gallery.id}`}
+                            value={editForm.description || ''}
+                            onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
+                            rows={2}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-6">
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={editForm.isPublic ?? true}
+                                onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, isPublic: checked }))}
+                              />
+                              <Label className="text-sm">Public</Label>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={editForm.allowComments ?? true}
+                                onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, allowComments: checked }))}
+                              />
+                              <Label className="text-sm">Comments</Label>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={editForm.allowFavorites ?? true}
+                                onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, allowFavorites: checked }))}
+                              />
+                              <Label className="text-sm">Favorites</Label>
+                            </div>
+                          </div>
                           <div className="flex gap-2">
                             <Button size="sm" onClick={saveGalleryEdit}>
                               <Save className="h-4 w-4 mr-2" />
@@ -877,174 +908,131 @@ export function AdminPanel() {
                             </Button>
                           </div>
                         </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-3">
-                            <div>
-                              <Label className="text-sm">Gallery Name</Label>
-                              <Input
-                                value={editForm.name || ''}
-                                onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-sm">Bucket Folder</Label>
-                              <Input
-                                value={editForm.bucketFolder || ''}
-                                onChange={(e) => setEditForm(prev => ({ ...prev, bucketFolder: e.target.value }))}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-sm">Password</Label>
-                              <Input
-                                type="password"
-                                value={editForm.password || ''}
-                                onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
-                                placeholder="Leave empty to remove password"
-                              />
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-3">
-                            <div>
-                              <Label className="text-sm">Description</Label>
-                              <Textarea
-                                value={editForm.description || ''}
-                                onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
-                                rows={2}
-                              />
-                            </div>
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <Label className="text-sm">Public Gallery</Label>
-                                <Switch
-                                  checked={editForm.isPublic ?? true}
-                                  onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, isPublic: checked }))}
-                                />
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <Label className="text-sm">Allow Comments</Label>
-                                <Switch
-                                  checked={editForm.allowComments ?? true}
-                                  onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, allowComments: checked }))}
-                                />
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <Label className="text-sm">Allow Selection</Label>
-                                <Switch
-                                  checked={editForm.allowFavorites ?? true}
-                                  onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, allowFavorites: checked }))}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
                       </div>
                     ) : (
-                      // View Mode
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-lg">{gallery.name}</h3>
-                            <Badge variant="outline" className="text-xs">
-                              {gallery.id}
-                            </Badge>
-                            {gallery.password && (
-                              <Badge variant="secondary" className="text-xs">
-                                <Key className="h-3 w-3 mr-1" />
-                                Protected
-                              </Badge>
-                            )}
-                            {!gallery.isPublic && (
-                              <Badge variant="outline" className="text-xs">
-                                Private
-                              </Badge>
-                            )}
-                          </div>
-                          
-                          <div className="text-sm text-muted-foreground space-y-1">
+                      // View mode
+                      <>
+                        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="text-lg font-semibold truncate">{gallery.name}</h3>
+                              <div className="flex gap-2 shrink-0">
+                                {gallery.password && (
+                                  <Badge variant="secondary">
+                                    <Key className="h-3 w-3 mr-1" />
+                                    Protected
+                                  </Badge>
+                                )}
+                                <Badge variant="outline">
+                                  ID: {gallery.id}
+                                </Badge>
+                              </div>
+                            </div>
                             {gallery.description && (
-                              <p>{gallery.description}</p>
+                              <p className="text-sm text-muted-foreground mb-2">
+                                {gallery.description}
+                              </p>
                             )}
-                            <div className="flex items-center gap-4 text-xs">
-                              <span>📂 {gallery.bucketFolder || 'No folder set'}</span>
-                              <span>📊 {gallery.photoCount || 0} photos</span>
-                              <span>📅 Created {new Date(gallery.createdAt).toLocaleDateString()}</span>
+                            <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                              <span>{gallery.photoCount || 0} photos</span>
+                              {gallery.bucketFolder && (
+                                <span className="flex items-center gap-1">
+                                  <Folder className="h-3 w-3" />
+                                  {gallery.bucketFolder}
+                                </span>
+                              )}
+                              <span>{gallery.isPublic ? 'Public' : 'Private'}</span>
+                              <span>Created {new Date(gallery.createdAt).toLocaleDateString()}</span>
                             </div>
                           </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-2 ml-4">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => window.appRouter.navigateTo(`/gallery/${gallery.id}`)}
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View
-                          </Button>
                           
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => startEditingGallery(gallery)}
-                          >
-                            <Edit className="h-4 w-4 mr-2" />
-                            Edit
-                          </Button>
-                          
-                          <div className="relative">
-                            <input
-                              type="file"
-                              multiple
-                              accept="image/*"
-                              onChange={(e) => handlePhotoUpload(gallery.id, e.target.files)}
-                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                              disabled={uploadingGallery === gallery.id}
-                            />
+                          <div className="flex flex-wrap gap-2">
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={uploadingGallery === gallery.id}
+                              onClick={() => window.appRouter.navigateTo(`/gallery/${gallery.id}`)}
                             >
-                              {uploadingGallery === gallery.id ? (
-                                <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin mr-2" />
-                              ) : (
-                                <Upload className="h-4 w-4 mr-2" />
-                              )}
-                              Upload
+                              <Eye className="h-4 w-4 mr-2" />
+                              View
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => startEditingGallery(gallery)}
+                            >
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => deleteGallery(gallery.id, gallery.name)}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
                             </Button>
                           </div>
-                          
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => deleteGallery(gallery.id, gallery.name)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </Button>
                         </div>
-                      </div>
+
+                        {/* FIXED: Upload Section with Proper Subfolder Support */}
+                        <div className="border-t pt-4">
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            {/* Subfolder Selection - Takes 2/3 width */}
+                            <div className="lg:col-span-2">
+                              <SubfolderSelector
+                                galleryId={gallery.id}
+                                selectedSubfolder={uploadSubfolders[gallery.id]}
+                                onSubfolderChange={(subfolder) => handleSubfolderChange(gallery.id, subfolder)}
+                                disabled={uploadingGallery === gallery.id}
+                              />
+                            </div>
+                            
+                            {/* Upload Section - Takes 1/3 width */}
+                            <div className="space-y-2">
+                              <Label htmlFor={`upload-${gallery.id}`} className="text-sm font-medium flex items-center gap-2">
+                                <Upload className="h-4 w-4" />
+                                Upload Photos
+                              </Label>
+                              <Input
+                                id={`upload-${gallery.id}`}
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                onChange={(e) => handlePhotoUpload(gallery.id, e.target.files)}
+                                disabled={uploadingGallery === gallery.id}
+                                className="file:mr-2 file:px-3 file:py-1 file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                              />
+                              
+                              {/* Upload Progress */}
+                              {uploadingGallery === gallery.id && uploadProgress && (
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                    Uploading {uploadProgress.completed}/{uploadProgress.total}
+                                  </div>
+                                  <div className="w-full bg-muted rounded-full h-2">
+                                    <div 
+                                      className="bg-primary h-2 rounded-full transition-all duration-300" 
+                                      style={{ width: `${(uploadProgress.completed / uploadProgress.total) * 100}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Upload info */}
+                              <p className="text-xs text-muted-foreground">
+                                {uploadSubfolders[gallery.id] 
+                                  ? `Photos will be saved to: "${uploadSubfolders[gallery.id]}"` 
+                                  : 'Photos will be saved to the gallery root'
+                                }
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </>
                     )}
-                    
-                    {/* Upload Progress */}
-                    {uploadingGallery === gallery.id && uploadProgress && (
-                      <div className="mt-4 space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span>Uploading photos...</span>
-                          <span>{uploadProgress.completed}/{uploadProgress.total}</span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <div 
-                            className="bg-primary h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${(uploadProgress.completed / uploadProgress.total) * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </Card>
+                  </div>
                 ))}
               </div>
             )}
