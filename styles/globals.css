@@ -669,6 +669,10 @@ html {
     z-index: 100000; /* Higher than container */
   }
 
+  div[data-radix-popper-content-wrapper] {
+    background-color: #ffffff;
+}
+  
   .lightbox-close {
     position: fixed; /* Changed from absolute to fixed */
     top: 20px;
