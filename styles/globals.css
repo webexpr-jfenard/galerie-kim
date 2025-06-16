@@ -93,6 +93,8 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+.folder > svg {display:none}
+
 .hover\:bg-primary\/90:hover {
     background-color: black;
 }
