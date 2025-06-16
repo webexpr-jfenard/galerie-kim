@@ -120,7 +120,7 @@ export function SubfolderSelector({
           disabled={disabled || isLoading}
         >
           <SelectTrigger className="w-full">
-            <div className="flex items-center gap-2 bg-white">
+            <div className="flex items-center gap-2 bg-white folder">
               <Folder className="h-4 w-4 text-muted-foreground" />
               <SelectValue placeholder="Choisir un sous-dossier existant ou créer un nouveau..." />
             </div>
